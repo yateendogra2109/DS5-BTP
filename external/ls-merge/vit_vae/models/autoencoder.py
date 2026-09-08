@@ -682,7 +682,10 @@ class AutoencoderKL(nn.Module):
         if self.use_vae:
             mu = self.fc_mu(z)
             logvar = self.fc_logvar(z)
-            z = self.reparameterize(mu, logvar)
+            if getattr(self, 'deterministic', False):
+                z = mu
+            else:
+                z = self.reparameterize(mu, logvar)
         else:
             mu = None
             logvar = None

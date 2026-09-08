@@ -30,8 +30,8 @@ llama-2-13b:
 test_4b_models:
     - meta-llama/Llama-3.2-3B-Instruct
 
-
-
+qwen_models:
+  - Qwen/Qwen2.5-1.5B-Instruct
 
 
 

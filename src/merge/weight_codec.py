@@ -28,7 +28,8 @@ def extract_weight_chunks(
     select_layers: Optional[Sequence[str]] = None,
     normalize: Optional[str] = None,
     scale: float = 1.0,
-) -> Tuple[torch.Tensor, torch.Tensor, List[dict], int]:
+    include_mask: bool = True,
+) -> Tuple[torch.Tensor, Optional[torch.Tensor], List[dict], int]:
     """
     Convert a model state_dict into VAE-ready chunks using ls-merge utilities.
 
@@ -50,7 +51,9 @@ def extract_weight_chunks(
     if chunks is None:
         raise ValueError("No weights extracted from state_dict")
 
-    mask = torch.ones_like(chunks)
+    # The VAE encoder does not consume this mask.  Visualization can omit it
+    # to avoid an additional full-size allocation for large models.
+    mask = torch.ones_like(chunks) if include_mask else None
     if scale != 1.0:
         chunks = chunks / scale
 

@@ -62,6 +62,9 @@ def get_parser():
     parser.add_argument('--wandb_mode',    default='online',                       type=str,
                         choices=['online', 'offline', 'disabled'])
     parser.add_argument('--log_interval',  default=10,                             type=int)
+    parser.add_argument('--stage1_epochs', default=5000, type=int, help='Epochs for deterministic AE')
+    parser.add_argument('--kl_weight', default=0.0001, type=float, help='Target KL weight for Stage 2')
+    parser.add_argument('--topk', default=None, type=int, help='Limit dataset size for testing')
     return parser
 
 
@@ -170,6 +173,11 @@ def train(model, optimizer, scheduler, n_epochs, train_loader,
 
     for epoch in range(n_epochs):
 
+        # Two-stage curriculum logic
+        is_stage1 = epoch < args.stage1_epochs
+        unwrap(model).deterministic = is_stage1
+        current_kl = 0.0 if is_stage1 else args.kl_weight
+
         # DistributedSampler must be re-seeded each epoch for proper shuffling
         if train_sampler is not None:
             train_sampler.set_epoch(epoch)
@@ -195,7 +203,7 @@ def train(model, optimizer, scheduler, n_epochs, train_loader,
             if mask is not None:
                 mask = mask.to(x.device)
 
-            loss, logs = unwrap(model).compute_loss(dec, x, mu, logvar, mask=mask)
+            loss, logs = unwrap(model).compute_loss(dec, x, mu, logvar, kl_weight=current_kl, mask=mask)
 
             if not torch.isfinite(loss):
                 if is_main(rank):
@@ -344,7 +352,7 @@ if __name__ == '__main__':
 
     trainset = ZooDataset(
         datapath=args.data, dataset=args.dataset, split=args.split,
-        topk=None, scale=0.025, transform=None, normalize=None,
+        topk=args.topk, scale=0.025, transform=None, normalize=None,
         tgt=None, exd=["bias","norm", "ln"], to_image=False, in_ch=1,
         length=args.length, n_tok=16,
         input_size=32, lamda=0.1,

@@ -11,8 +11,6 @@ import torchvision.transforms as transforms
 from torch.utils.data import Dataset
 from transformers import AutoModelForCausalLM, Gemma3ForCausalLM
 
-from diagnose_compressibility import normalize
-
 
 def load_models(yaml_file, model_name=None):
     try:

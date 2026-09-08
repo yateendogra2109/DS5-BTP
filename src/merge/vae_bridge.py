@@ -57,6 +57,8 @@ class VaeBridge:
         chunks: torch.Tensor,
         *,
         deterministic: bool = True,
+        batch_size: int = 1,
+        return_moments: bool = True,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
         """
         Encode weight chunks.
@@ -64,25 +66,37 @@ class VaeBridge:
         chunks: (num_chunks, chunk_size) or (num_chunks, n_tok, length)
         Returns sampled latents (or mu), mu, logvar.
         """
-        latents = []
-        mus = []
-        logvars = []
+        if batch_size < 1:
+            raise ValueError("batch_size must be positive")
 
-        for idx in range(chunks.shape[0]):
-            x = chunks[idx].to(self.device).float().reshape(1, -1)
+        latent_tensor = None
+        mu_tensor = None
+        logvar_tensor = None
+        for start in range(0, chunks.shape[0], batch_size):
+            stop = min(start + batch_size, chunks.shape[0])
+            x = chunks[start:stop].to(self.device).float().reshape(stop - start, -1)
             z, mu, logvar = self.model.encode(x)
-            if deterministic and mu is not None:
-                latents.append(mu.detach().cpu())
-            else:
-                latents.append(z.detach().cpu())
-            if mu is not None:
-                mus.append(mu.detach().cpu())
-            if logvar is not None:
-                logvars.append(logvar.detach().cpu())
+            chosen_is_mu = deterministic and mu is not None
+            chosen = mu if chosen_is_mu else z
+            chosen = chosen.detach().cpu()
+            if latent_tensor is None:
+                latent_tensor = torch.empty((chunks.shape[0], *chosen.shape[1:]), dtype=chosen.dtype)
+            latent_tensor[start:stop] = chosen
 
-        latent_tensor = torch.cat(latents, dim=0)
-        mu_tensor = torch.cat(mus, dim=0) if mus else None
-        logvar_tensor = torch.cat(logvars, dim=0) if logvars else None
+            if return_moments and mu is not None:
+                if chosen_is_mu:
+                    mu_tensor = latent_tensor
+                elif mu_tensor is None:
+                    mu_tensor = torch.empty((chunks.shape[0], *mu.shape[1:]), dtype=chosen.dtype)
+                if mu_tensor is not latent_tensor:
+                    mu_tensor[start:stop] = mu.detach().cpu()
+            if return_moments and logvar is not None:
+                if logvar_tensor is None:
+                    logvar_tensor = torch.empty((chunks.shape[0], *logvar.shape[1:]), dtype=chosen.dtype)
+                logvar_tensor[start:stop] = logvar.detach().cpu()
+
+        if latent_tensor is None:
+            raise ValueError("No chunks supplied for encoding")
         return latent_tensor, mu_tensor, logvar_tensor
 
     @torch.no_grad()
@@ -107,6 +121,7 @@ class VaeBridge:
         skip_if_contains=("bias", "norm", "ln"),
         select_layers=None,
         deterministic: bool = True,
+        batch_size: int = 1,
     ) -> LatentBundle:
         chunks, mask, metadata, total_numel = extract_weight_chunks(
             state_dict,
@@ -115,7 +130,9 @@ class VaeBridge:
             select_layers=select_layers,
             scale=scale,
         )
-        latents, mu, logvar = self.encode_chunks(chunks, deterministic=deterministic)
+        latents, mu, logvar = self.encode_chunks(
+            chunks, deterministic=deterministic, batch_size=batch_size
+        )
         return LatentBundle(
             latents=latents,
             chunks=chunks,
